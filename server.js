@@ -32,31 +32,36 @@ const constructDestUrl = (domain, path, query) => {
   const isHttps =
     !domain.includes(":") ||
     domain.includes(":443") ||
-    /^s\\d+\\./.test(domain);
+    /^s\d+\./.test(domain);
 
   return `${isHttps ? "https://" : "http://"}${domain}${path}${query}`;
 };
 
-app.use(express.raw({ type: "*/*", limit: "100mb" }));
+app.use(express.raw({
+  type: "*/*",
+  limit: "100mb",
+}));
 
-app.all("*", async (req, res) => {
+app.use(async (req, res) => {
   try {
     const destHost = req.headers["x-host"];
 
-    // Root fallback
+    // fallback page
     if (req.path === "/" && !destHost) {
-      const wsCheck = (req.headers["upgrade"] || "").toLowerCase();
+      const wsCheck =
+        (req.headers["upgrade"] || "").toLowerCase();
 
       if (wsCheck !== "websocket") {
         const fallbackRes = await fetch(FALLBACK_PAGE);
-        const text = await fallbackRes.text();
+
+        const html = await fallbackRes.text();
 
         res.setHeader(
           "content-type",
           "text/html; charset=UTF-8"
         );
 
-        return res.send(text);
+        return res.send(html);
       }
     }
 
@@ -66,12 +71,14 @@ app.all("*", async (req, res) => {
         .send("Invalid Request: Missing target host.");
     }
 
+    const query = req.originalUrl.includes("?")
+      ? "?" + req.originalUrl.split("?")[1]
+      : "";
+
     const finalUrl = constructDestUrl(
       destHost,
       req.path,
-      req.url.includes("?")
-        ? "?" + req.url.split("?")[1]
-        : ""
+      query
     );
 
     const proxyHeaders = {};
@@ -96,7 +103,9 @@ app.all("*", async (req, res) => {
       }
 
       if (lowerKey === "x-forwarded-for") {
-        if (!clientAddress) clientAddress = value;
+        if (!clientAddress) {
+          clientAddress = value;
+        }
         continue;
       }
 
@@ -104,7 +113,8 @@ app.all("*", async (req, res) => {
     }
 
     if (clientAddress) {
-      proxyHeaders["x-forwarded-for"] = clientAddress;
+      proxyHeaders["x-forwarded-for"] =
+        clientAddress;
     }
 
     const fetchConfig = {
@@ -120,19 +130,28 @@ app.all("*", async (req, res) => {
       fetchConfig.body = req.body;
     }
 
-    const serverRes = await fetch(finalUrl, fetchConfig);
+    const serverRes = await fetch(
+      finalUrl,
+      fetchConfig
+    );
 
     res.status(serverRes.status);
 
     serverRes.headers.forEach((value, key) => {
-      if (key.toLowerCase() !== "transfer-encoding") {
+      if (
+        key.toLowerCase() !==
+        "transfer-encoding"
+      ) {
         res.setHeader(key, value);
       }
     });
 
-    const arrayBuffer = await serverRes.arrayBuffer();
+    const buffer = Buffer.from(
+      await serverRes.arrayBuffer()
+    );
 
-    res.send(Buffer.from(arrayBuffer));
+    res.send(buffer);
+
   } catch (err) {
     console.error(err);
 
@@ -145,5 +164,7 @@ app.all("*", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Proxy server running on port ${PORT}`);
+  console.log(
+    `Proxy server running on port ${PORT}`
+  );
 });
